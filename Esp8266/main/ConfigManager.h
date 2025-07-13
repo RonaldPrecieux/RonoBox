@@ -23,6 +23,7 @@ public:
   NetworkConfig getConfig();
   void startAP();
   void handleClient();
+  void resetConfiguration();
 
 private:
   ESP8266WebServer server;

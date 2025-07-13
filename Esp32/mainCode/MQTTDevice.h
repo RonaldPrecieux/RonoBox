@@ -5,7 +5,7 @@
 #include <PubSubClient.h>
 #include "MQTTTopicManager.h"
 #include "HADiscoveryConfig.h"
-
+ 
 class MQTTDevice {
 public:
     MQTTDevice(const String& macAddress)
@@ -14,20 +14,40 @@ public:
           topicManager(mqttClient, macAddress),
           haConfig(topicManager) {}
 
-    void begin( const char* mqttServer, int mqttPort = 1883) {
+    bool begin( const char* mqttServer, int mqttPort = 1883) {
         
         mqttClient.setServer(mqttServer, mqttPort);
         mqttClient.setCallback([this](char* topic, byte* payload, unsigned int length) {
             this->mqttCallback(topic, payload, length);
         });
+        return reconnect();
+    }
+     bool begin(const IPAddress& mqttServer, int mqttPort = 1883) {
+        mqttClient.setServer(mqttServer, mqttPort);
+        mqttClient.setCallback([this](char* topic, byte* payload, unsigned int length) {
+            this->mqttCallback(topic, payload, length);
+        });
+        return reconnect();   }
+
+  void handle() {
+    if (!mqttClient.connected()) {
+        unsigned long now = millis();
+        if (now - lastReconnectAttempt > reconnectInterval) {
+            Serial.println("[MQTT] Tentative de reconnexion...");
+
+            if (reconnect()) {
+                Serial.println("[MQTT] Reconnexion réussie !");
+            } else {
+                Serial.println("[MQTT] Échec de reconnexion.");
+            }
+
+            lastReconnectAttempt = now;
+        }
+        return;
     }
 
-    void handle() {
-        if (!mqttClient.connected()) {
-            reconnect();
-        }
-        mqttClient.loop();
-    }
+    mqttClient.loop();
+}
 
     bool isConnected() {
         return mqttClient.connected();
@@ -44,8 +64,9 @@ public:
     void publishSensorData(const String& location, const String& sensor, const String& value) {
         topicManager.publish(location, sensor, "state", value, true);
     }
+  
     void publishSensorData(const String& location, const String& sensor, const bool& value) {
-        topicManager.publish(location, sensor, "state", String(value), true);
+        topicManager.publish(location, sensor, "state", value?"ON":"OFF", true);
     }
 
     virtual void handleCommand(const String& location, const String& device, const String& value) = 0;
@@ -59,22 +80,28 @@ protected:
     HADiscoveryConfig haConfig;
 
 private:
-    void reconnect() {
-        while (!mqttClient.connected()) {
-            String clientId = "ESP32Client-" + String((uint32_t)ESP.getEfuseMac());
-            
-            if (mqttClient.connect(clientId.c_str())) {
-                // Abonnements aux topics
-                String subscribeTopic = topicManager.getBaseTopic() + "/+/set";
-                mqttClient.subscribe(subscribeTopic.c_str());
-                
-                subscribeTopic = topicManager.getBaseTopic("salon") + "/+/set";
-                mqttClient.subscribe(subscribeTopic.c_str());
-            } else {
-                delay(5000);
-            }
-        }
+unsigned long lastReconnectAttempt = 0;
+const unsigned long reconnectInterval = 10000;
+bool reconnect() {
+     String clientId = "ESP8266Client-" + String((uint32_t)ESP.getEfuseMac());
+
+    if (mqttClient.connect(clientId.c_str())) {
+        Serial.println("[MQTT] Connecté avec succès !");
+
+        String subscribeTopic = topicManager.getBaseTopic() + "/+/set";
+        mqttClient.subscribe(subscribeTopic.c_str());
+
+        subscribeTopic = topicManager.getBaseTopic("salon") + "/+/set";
+        mqttClient.subscribe(subscribeTopic.c_str());
+
+        return true;
+    } else {
+        Serial.printf("[MQTT] Échec connexion. Code = %d\n", mqttClient.state());
+        return false;
     }
+}
+
+
 
     void mqttCallback(char* topic, byte* payload, unsigned int length) {
         // 1. Optimisation: Utilisation de buffers statiques pour éviter les allocations dynamiques

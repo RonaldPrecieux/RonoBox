@@ -23,6 +23,11 @@ public:
 
         return sendConfig("sensor", location + "_" + sensor, doc);
     }
+    // Overloaded function for sensors without device class
+    bool sendSensorConfig(const String& location, const String& sensor, const String& unit, 
+                      const String& friendlyName) {
+    return sendSensorConfig(location, sensor, "", unit, friendlyName);
+    }
 
     bool sendSwitchConfig(const String& location, const String& switchName, 
                         const String& friendlyName) {

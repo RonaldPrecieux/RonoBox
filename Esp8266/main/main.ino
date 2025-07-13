@@ -4,156 +4,157 @@
 #include "ConfigManager.h"
 #define BOUTON_RESET_CONFIG 0
 
+// Définitions des broches
+#define RELAY_PIN D5      // Broche pour le relais
+#define SOUND_SENSOR_PIN D6  // Broche analogique pour le capteur de son
+
 class MySmartHomeDevice : public MQTTDevice {
+private:
+    bool lampState;
+    bool soundControlEnabled;
+    unsigned long lastSoundDetection;
+    const unsigned long soundTimeout = 1000;
+ 
 public:
-    // Utilisation de WiFi.macAddress() pour ESP8266
-    MySmartHomeDevice() : MQTTDevice(WiFi.macAddress()) {}
+    MySmartHomeDevice() : MQTTDevice(WiFi.macAddress()), lampState(false), soundControlEnabled(true), lastSoundDetection(0) {
+        pinMode(RELAY_PIN, OUTPUT);
+        digitalWrite(RELAY_PIN, LOW);
+        pinMode(SOUND_SENSOR_PIN, INPUT);
+    }
 
-void setupHA() {
-        // Envoyer les configurations avec gestion des erreurs
-        //bool HADiscoveryConfig::sendSensorConfig(const String & location, const String & sensor, const String & deviceClass, const String & unit, const String & friendlyName)
-        //Capteur de temperature
-        if(!getHAConfig().sendSensorConfig("salon", "temperature", "temperature", "°C", "Température Salon")) {
-            Serial.println("Échec de la configuration du capteur de température");
-        }else{
-        Serial.println("Succès de la configuration du capteur de température");
+        void initPublish(){
+        publishSensorData("salon", "lampe", lampState ? "ON" : "OFF");
+        // Control Sound
+        publishSensorData("salon", "sound", soundControlEnabled ? "ON" : "OFF");
 
-        }
-        
-        delay(500); // Délai entre les configurations
-        //Capteur d'humidité
-        if(!getHAConfig().sendSensorConfig("salon", "humidite", "humidity", "%", "Humidité Salon")) {
-            Serial.println("Échec de la configuration du capteur d'humidité");
-        }else{
-        Serial.println("Succès de la configuration du capteur d'humidité");
-
-        }
-        
-        delay(500);
-        //Switch Lampe
-        if(!getHAConfig().sendSwitchConfig("cuisine", "lampe", "Lampe Cuisine")) {
-            Serial.println("Échec de la configuration de la lampe");
-        } else{
-                  Serial.println("Succès de la configuration de la lampe");
-
-        }
-
-                // Capteur de gaz MQ2
-        if (!getHAConfig().sendSensorConfig("salon", "gaz", "gas", "ppm", "Détection de gaz (MQ2)")) {
-            Serial.println("Échec de la configuration du capteur de gaz");
-        } else {
-            Serial.println("Succès de la configuration du capteur de gaz");
-        }
-        delay(500);
-
-        // Capteur d’humidité du sol
-        if (!getHAConfig().sendSensorConfig("salon", "humidite_sol", "moisture", "%", "Humidité du sol")) {
-            Serial.println("Échec de la configuration du capteur d'humidité du sol");
-        } else {
-            Serial.println("Succès de la configuration du capteur d'humidité du sol");
-        }
-        delay(500);
-
-        // Capteur de niveau d’eau
-        if (!getHAConfig().sendSensorConfig("salon", "niveau_eau", "moisture", "%", "Niveau d’eau")) {
-            Serial.println("Échec de la configuration du capteur de niveau d’eau");
-        } else {
-            Serial.println("Succès de la configuration du capteur de niveau d’eau");
-        }
-        delay(500);
-
-        // Capteur PIR (détection de mouvement) - binaire
-        if (!getHAConfig().sendBinarySensorConfig("salon", "presence", "motion", "Présence détectée")) {
-            Serial.println("Échec de la configuration du capteur PIR");
-        } else {
-            Serial.println("Succès de la configuration du capteur PIR");
-        }
 
     }
 
+    void setupHA() {    
+        // Switch Lampe
+        if(!getHAConfig().sendSwitchConfig("salon", "lampe", "Lampe Salon")) {
+            Serial.println("Échec de la configuration de la lampe");
+        } else {
+            Serial.println("Succès de la configuration de la lampe");
+        }
+
+        delay(500);
+        
+        // Capteur de son
+        //    bool sendBinarySensorConfig(const String& location, const String& sensor,
+       //                        const String& deviceClass, const String& friendlyName);
+
+        if(!getHAConfig().sendBinarySensorConfig("salon", "detection_son", "song", "Détection de son")) {
+            Serial.println("Échec de la configuration du capteur de son");
+        } else {
+            Serial.println("Succès de la configuration du capteur de son");
+        }
+
+        delay(500);
+        
+        // Switch pour contrôle par son
+        if(!getHAConfig().sendSwitchConfig("salon", "sound", "Controle veilleuse par son")) {
+            Serial.println("Échec de la configuration du contrôle par son");
+        } else {
+            Serial.println("Succès de la configuration du contrôle par son");
+        }
+    }
 
     void handleCommand(const String& location, const String& device, const String& value) override {
+        Serial.printf("Commande reçue - Location: %s, Device: %s, Value: %s\n", 
+                location.c_str(), device.c_str(), value.c_str());
+    
         if (device == "lampe") {
-            // Contrôler la lampe
+            setLampState(value == "ON");
             Serial.print("Commande lampe reçue: ");
             Serial.println(value);
-            publishSensorData(location, device, value); // Mettre à jour l'état
-            Serial.printf("Commande Lampe recu et exeuté %s dans la ",location);
+            publishSensorData(location, device, lampState ? "ON" : "OFF");
         }
-        // ... autres commandes
+        else if (device == "sound") {
+            soundControlEnabled = (value == "ON");
+            publishSensorData(location, device, soundControlEnabled ? "ON" : "OFF");
+            Serial.print("Contrôle par son ");
+            Serial.println(soundControlEnabled ? "activé" : "désactivé");
+        }
+    }
+
+
+
+    void setLampState(bool state) {
+        lampState = state;
+        digitalWrite(RELAY_PIN, state ? HIGH : LOW);
+        publishSensorData("salon", "lampe", state ? "ON" : "OFF");
+    }
+
+    void toggleLamp() {
+        setLampState(!lampState);
+    }
+
+    void checkSoundSensor() {
+        if (!soundControlEnabled) return;
+        
+        int soundValue = digitalRead(SOUND_SENSOR_PIN);
+        
+        if (soundValue && (millis() - lastSoundDetection > soundTimeout)) {
+            lastSoundDetection = millis();
+            toggleLamp();
+            publishSensorData("salon", "detection_son", "ON");
+        }
+    }
+
+    void handle() {
+        MQTTDevice::handle();
+        checkSoundSensor();
     }
 };
+
 ConfigManager configManager;
 MySmartHomeDevice device;
+NetworkConfig config;
 
 void setup() {
-
-  Serial.begin(115200);
-  delay(2000);
-
-
-  pinMode(BOUTON_RESET_CONFIG, INPUT_PULLUP);
-
- int holdTime = 0;
-while (digitalRead(BOUTON_RESET_CONFIG) == LOW) {
-  delay(100);
-  holdTime += 100;
-  if (holdTime > 3000) break; // Appui de 3 secondes
-}
-
-if (holdTime > 3000) {
-  configManager.resetConfiguration();
-  ESP.restart();
-}
-  Serial.println("App Launching");
-  // Récupère la config pour Debug
-              
-  if (!configManager.begin()) {
-    Serial.println("Mode configuration AP actif");
-    Serial.println("Connectez-vous au WiFi 'SmartHome-Config'");
-    Serial.println("Ouvrez http://192.168.4.1 dans votre navigateur");
-    Serial.println("##############Debug##################");
-      NetworkConfig config = configManager.getConfig();
-
-      Serial.println("Tentative de connexion à: ");
-        Serial.println(config.wifiSSID);
-        Serial.print("Avec le mot de passe: ");
-        Serial.println(config.wifiPassword); // Attention: ne faites pas ça en production!
-            
-    while (!configManager.isConfigured()) {
-            configManager.handleClient();
-            delay(100);
-        }
- } // Bloquer en mode configuration
-
-      NetworkConfig config = configManager.getConfig();
-
-
-  // Utilisation de begin() avec la configuration chargée
-    device.begin(config.mqttServer.c_str());
-
-    // Attendre que la connexion soit stable
+    Serial.begin(115200);
     delay(2000);
 
 
+    Serial.println("App Launching");
+              
+    if (!configManager.begin()) {
+        Serial.println("Mode configuration AP actif");
+        Serial.println("Connectez-vous au WiFi 'SmartHome-Config'");
+        Serial.println("Ouvrez http://192.168.4.1 dans votre navigateur");
+        
+        // Debug
+        NetworkConfig config = configManager.getConfig();
+        Serial.println("Tentative de connexion à: ");
+        Serial.println(config.wifiSSID);
+            
+        while (!configManager.isConfigured()) {
+            configManager.handleClient();
+            delay(100);
+        }
+    }
+
+    config = configManager.getConfig();
+    device.begin(config.mqttServer.c_str());
+    delay(2000);
     device.setupHA();
-      // Envoyer les configurations avec gestion des erreurs
-    
-    delay(500); // Délai entre les configurations
-    
+    delay(500);
+    device.initPublish();
 }
 
-void loop() {
 
-    // Utilisation de handle() au lieu de loop()
+void loop() {
+ 
     device.handle();
+    
     
     // Simuler des données de capteurs
     static unsigned long lastSend = 0;
     if (millis() - lastSend > 5000) {
         float temperature = random(200, 300) / 10.0;
         float humidity = random(300, 800) / 10.0;
-         // Température et humidité
+        
         device.publishSensorData("salon", "temperature", temperature);
         device.publishSensorData("salon", "humidite", humidity);
       

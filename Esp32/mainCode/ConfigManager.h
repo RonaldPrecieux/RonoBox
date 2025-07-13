@@ -22,6 +22,7 @@ public:
   NetworkConfig getConfig();
   void startAP();
   void handleClient();
+ 
 
 private:
   Preferences preferences;
@@ -35,6 +36,8 @@ private:
   void loadConfiguration();
   void saveConfiguration();
   void setupServer();
+  void resetConfiguration();
+  void handleReset();
 };
 
 #endif

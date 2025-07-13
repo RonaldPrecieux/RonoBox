@@ -1,6 +1,7 @@
 //ConfigManager.cpp
 #include "ConfigManager.h"
 #include <DNSServer.h>
+#include <EEPROM.h> // N'oubliez pas d'inclure EEPROM
 
 const char* AP_SSID = "SmartHome-Config";
 const char* AP_PASSWORD = "configureme";
@@ -36,11 +37,28 @@ bool ConfigManager::begin() {
     
     Serial.println("\nÉchec de connexion WiFi");
   }
-
+//Si il n'y a pas de config
   startAP();
   return false;
 }
 
+// bool reconnectWifi(){
+//   if (config.wifiSSID.length() > 0) {
+//     WiFi.mode(WIFI_STA);
+//     WiFi.begin(config.wifiSSID.c_str(), config.wifiPassword.c_str());
+    
+//     Serial.print("Tentative de reconnection WiFi...");   
+    
+//     if (WiFi.status() == WL_CONNECTED) {
+//       Serial.println("\nConnecté!");
+//       Serial.print("IP: ");
+//       Serial.println(WiFi.localIP());
+//       return true;
+//     }
+    
+//     Serial.println("\nÉchec de connexion WiFi");
+//   }
+// }
 void ConfigManager::writeStringToEEPROM(int addr, const String &str) {
   int maxLen = 100;
   int len = str.length();

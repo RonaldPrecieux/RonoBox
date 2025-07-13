@@ -11,14 +11,7 @@ DNSServer dnsServer;
 ConfigManager::ConfigManager() : server(80) {}
 
 bool ConfigManager::begin() {
-  
-
   preferences.begin("smart-home", false);
-  // //EFFACE
-  // preferences.clear();
-  // preferences.end();
-  // ESP.restart();  // Redémarrer pour appliquer
-
   loadConfiguration();
 
   if (config.wifiSSID.length() > 0) {
@@ -96,9 +89,15 @@ void ConfigManager::saveConfiguration() {
   preferences.putString("mqtt_pass", config.mqttPassword);
 }
 
+void ConfigManager::resetConfiguration() {
+  preferences.clear();
+  config = NetworkConfig(); // Réinitialiser la configuration en mémoire
+}
+
 void ConfigManager::setupServer() {
   server.on("/", HTTP_GET, [this]() { handleRoot(); });
   server.on("/save", HTTP_POST, [this]() { handleSave(); });
+  server.on("/reset", HTTP_POST, [this]() { handleReset(); });
   server.onNotFound([this]() { handleNotFound(); });
   server.begin();
 }
@@ -108,6 +107,7 @@ void ConfigManager::handleRoot() {
   <!DOCTYPE html>
   <html>
   <head>
+    <meta charset="UTF-8">
     <title>Configuration SmartHome</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -117,56 +117,60 @@ void ConfigManager::handleRoot() {
       label { display: block; margin-bottom: 5px; }
       input { width: 100%; padding: 8px; box-sizing: border-box; }
       button { background: #4CAF50; color: white; padding: 10px 15px; border: none; width: 100%; }
+      .reset-btn { background: #f44336; margin-top: 20px; }
+      .form-section { background: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+      h2 { margin-top: 0; color: #333; }
     </style>
   </head>
   <body>
     <div class="container">
       <h1>Configuration SmartHome</h1>
-      <form action="/save" method="post">
-        <div class="form-group">
-          <label for="ssid">WiFi SSID:</label>
-          <input type="text" id="ssid" name="ssid" required value=")=====";
+      
+      <div class="form-section">
+        <h2>Paramètres WiFi</h2>
+        <form action="/save" method="post">
+          <div class="form-group">
+            <label for="ssid">SSID WiFi:</label>
+            <input type="text" id="ssid" name="ssid" required value=")=====";
   html += config.wifiSSID;
   html += R"=====(">
-        </div>
-        
-        <div class="form-group">
-          <label for="pass">WiFi Password:</label>
-          <input type="password" id="pass" name="pass" value=")=====";
+          </div>
+          
+          <div class="form-group">
+            <label for="pass">Mot de passe WiFi:</label>
+            <input type="password" id="pass" name="pass" value=")=====";
   html += config.wifiPassword;
   html += R"=====(">
-        </div>
-        
-        <div class="form-group">
-          <label for="mqtt">MQTT Server:</label>
-          <input type="text" id="mqtt" name="mqtt" required value=")=====";
-  html += config.mqttServer;
-  html += R"=====(">
-        </div>
-        
-        <div class="form-group">
-          <label for="port">MQTT Port:</label>
-          <input type="number" id="port" name="port" value=")=====";
-  html += String(config.mqttPort);
-  html += R"=====(">
-        </div>
-        
-        <div class="form-group">
-          <label for="muser">MQTT User:</label>
-          <input type="text" id="muser" name="muser" value=")=====";
+          </div>
+      </div>
+      
+     
+          
+          <div class="form-group">
+            <label for="muser">Utilisateur MQTT:</label>
+            <input type="text" id="muser" name="muser" value=")=====";
   html += config.mqttUser;
   html += R"=====(">
-        </div>
-        
-        <div class="form-group">
-          <label for="mpass">MQTT Password:</label>
-          <input type="password" id="mpass" name="mpass" value=")=====";
+          </div>
+          
+          <div class="form-group">
+            <label for="mpass">Mot de passe MQTT:</label>
+            <input type="password" id="mpass" name="mpass" value=")=====";
   html += config.mqttPassword;
   html += R"=====(">
-        </div>
-        
-        <button type="submit">Enregistrer</button>
-      </form>
+          </div>
+          
+          <button type="submit">Enregistrer</button>
+        </form>
+      </div>
+      
+      <div class="form-section">
+        <h2>Réinitialisation</h2>
+        <p>Ceci effacera tous les paramètres et redémarrera l'appareil.</p>
+        <form action="/reset" method="post" onsubmit="return confirm('Êtes-vous sûr de vouloir réinitialiser tous les paramètres?');">
+          <button type="submit" class="reset-btn">Réinitialiser la configuration</button>
+        </form>
+      </div>
     </div>
   </body>
   </html>
@@ -185,8 +189,21 @@ void ConfigManager::handleSave() {
   
   saveConfiguration();
   
-  String html = "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='10;url=/'></head><body>";
+  String html = "<!DOCTYPE html><html><head><meta http-equiv='refresh' charset='UTF-8' content='10;url=/'></head><body>";
   html += "<h1>Configuration sauvegardée!</h1>";
+  html += "<p>Redémarrage dans 10 secondes...</p>";
+  html += "</body></html>";
+  
+  server.send(200, "text/html", html);
+  delay(1000);
+  ESP.restart();
+}
+
+void ConfigManager::handleReset() {
+  resetConfiguration();
+  
+  String html = "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='10;url=/'></head><body>";
+  html += "<h1>Configuration réinitialisée!</h1>";
   html += "<p>Redémarrage dans 10 secondes...</p>";
   html += "</body></html>";
   
