@@ -1,0 +1,17 @@
+🐞 Problèmes MQTT à corriger
+1. Connexion initiale manquée dans le setup()
+Si la tentative de connexion MQTT échoue dans la fonction setup() via mqtt.begin(), alors même si le serveur MQTT devient disponible plus tard pendant l'exécution de la boucle (loop()), aucune reconnexion ne se fait automatiquement.
+
+Par contre, si la connexion réussit bien dans le setup(), alors :
+
+Si le serveur MQTT est coupé plus tard, l'ESP prend trop de temps pour détecter la déconnexion.
+
+Si le serveur MQTT est redémarré pendant l'exécution de la boucle, la reconnexion se fait automatiquement.
+
+2. Reconnexions bloquantes dans le loop()
+Les tentatives de reconnexion MQTT dans le loop() sont bloquantes.
+
+Pendant ces tentatives, aucun autre traitement (lecture capteurs, mise à jour, affichage, etc.) n’est effectué par l’ESP.
+
+Cela bloque tout le fonctionnement de l’application tant que la reconnexion n’est pas terminée ou échoue.
+
