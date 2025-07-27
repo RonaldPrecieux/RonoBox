@@ -1,3 +1,4 @@
+#ifdef MODULE_STATION
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "MQTTDevice.h"
@@ -598,3 +599,4 @@ void loop() {
         }
     }
 }
+#endif // DMODULE_STATION

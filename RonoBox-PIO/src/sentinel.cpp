@@ -1,7 +1,9 @@
+#ifdef MODULE_SENTINEL
+
 #ifdef ESP32
 #include <WiFi.h>
-#else
-#include <ESP8266WiFi.h>
+#elif defined(ESP8266)
+  #include <ESP8266WiFi.h>
 #endif
 #include <PubSubClient.h>
 #include "MQTTDevice.h"
@@ -9,19 +11,28 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
+#define DEBUG  1
 
 
 ConfigManager configManager;
 
 // Définition des broches
-#define BUZZER_PIN 34
+#define BUZZER_PIN 25
 #define GAS_PIN 35
 #define PRESENCE_PIN 32
-#define TEMP_PIN 33
 #define LCD_SDA 21
 #define LCD_SCL 22
-#define DHT_PIN 33  // Broche connectée au DHT11 (remplace TEMP_PIN si besoin)
+#define DHT_PIN 33  
 #define DHT_TYPE DHT11
+IPAddress MQTTBrokerip;
+
+#define LED_PIN 4  // Broche de la LED (D4/GPIO2 sur ESP8266)
+
+// Variables pour le clignotement
+unsigned long BlinkpreviousMillis = 0;
+const long fastBlinkInterval = 200;  // Intervalle rapide (non connecté WiFi)
+const long normalBlinkInterval = 500; // Intervalle normal (WiFi OK mais pas MQTT)
+bool ledState = LOW;
 
 DHT dht(DHT_PIN, DHT_TYPE);
 
@@ -31,6 +42,7 @@ const unsigned long retryInterval = 15000;
 
 bool wifiConnected = false;
 bool mqttConnected = false;
+bool AlarmDeclenchedByHA = false;
 
 // Initialisation LCD
 LiquidCrystal_I2C lcd(0x27, 16, 2); // Adresse I2C 0x27, écran 16x2
@@ -53,11 +65,16 @@ public:
         if(!getHAConfig().sendSensorConfig("cuisine", "temperature", "temperature", "°C", "Température Cuisine")) {
             Serial.println("Échec configuration température");
         }
+        // Capteur d'humidité
+        if(!getHAConfig().sendSensorConfig("cuisine", "humidite", "humidity", "%", "Humidité Cuisine")) {
+            Serial.println("Échec de la configuration du capteur d'humidité");
+        }                 
         
         // Capteur de gaz
-        if(!getHAConfig().sendSensorConfig("cuisine", "gaz", "gas", "ppm", "Détection de gaz")) {
+        if(!getHAConfig().sendSensorConfig("cuisine", "gaz", "%", "Gaz Cuisine")) {
             Serial.println("Échec configuration capteur gaz");
         }
+
         
         // Capteur de présence
         if(!getHAConfig().sendBinarySensorConfig("cuisine", "presence", "motion", "Présence Cuisine")) {
@@ -73,6 +90,8 @@ public:
     void handleCommand(const String& location, const String& device, const String& value) override {
         if (device == "buzzer") {
             digitalWrite(BUZZER_PIN, value == "ON" ? HIGH : LOW);
+            AlarmDeclenchedByHA = (value == "ON");
+            Serial.println("Commande reçue pour le buzzer: " + value);
             publishSensorData(location, device, value);
             updateLCD();
         }
@@ -86,8 +105,8 @@ public:
     lcd.print(" C");
 
     lcd.setCursor(0, 1);
-    lcd.print("Hum: ");
-    lcd.print(readHumidity());
+    lcd.print("Gaz: ");
+    lcd.print(readGasLevelPercentage());
     lcd.print(" %");
 }
 
@@ -113,27 +132,64 @@ float readHumidity() {
     int readGasLevel() {
         return analogRead(GAS_PIN);
     }
+    int readGasLevelPercentage() {
+        int raw_level = analogRead(GAS_PIN);
+        return map(constrain(raw_level,500,4095), 500, 4095, 0, 100);
+    }
 
     bool readPresence() {
         return digitalRead(PRESENCE_PIN);
     }
-
-
     
+    void updateLED() {
+        unsigned long currentMillis = millis();
+        
+        if (!wifiConnected) {
+            // Clignotement rapide - Pas de WiFi
+            if (currentMillis - BlinkpreviousMillis >= fastBlinkInterval) {
+                BlinkpreviousMillis = currentMillis;
+                ledState = !ledState;
+                digitalWrite(LED_PIN, ledState);                                                    
+            
+        }    
+        }else if (!mqttConnection) {
+            // Clignotement normal - WiFi OK mais pas MQTT
+            if (currentMillis - BlinkpreviousMillis >= normalBlinkInterval) {
+                BlinkpreviousMillis = currentMillis;
+                ledState = !ledState;
+                digitalWrite(LED_PIN, ledState);
+            }
+        } else {
+            // LED allumée en continu - Tout est connecté
+            digitalWrite(LED_PIN, HIGH);
+        }
+    }
+
+
+
+
+    void handle() {
+        MQTTDevice::handle();
+       // tryReconnectWiFi(configManager.getConfig());
+        updateLED();  // Ajoutez cette ligne
+
+        
+    }
 
 };
-void tryReconnectWiFi(NetworkConfig config) {
-    if (!wifiConnected && millis() - lastWifiAttempt > retryInterval) {
-        Serial.println("Tentative de reconnexion WiFi...");
-        WiFi.begin(config.wifiSSID.c_str(), config.wifiPassword.c_str());
-        lastWifiAttempt = millis();
-    }
 
-    if (WiFi.status() == WL_CONNECTED) {
+void tryReconnectWiFi(NetworkConfig config) {
+    if (WiFi.status() != WL_CONNECTED) {
+        wifiConnected = false;
+        if (millis() - lastWifiAttempt > retryInterval) {
+            Serial.println("Tentative de reconnexion WiFi...");
+            WiFi.begin(config.wifiSSID.c_str(), config.wifiPassword.c_str());
+            lastWifiAttempt = millis();
+        }
+    } else {
         wifiConnected = true;
-        Serial.println("✅ WiFi reconnecté !");
     }
-  }
+}
 KitchenDevice device;
 
 void setup() {
@@ -144,6 +200,8 @@ void setup() {
     pinMode(GAS_PIN, INPUT);
     pinMode(PRESENCE_PIN, INPUT);
     pinMode(DHT_PIN, INPUT);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
     
     // Initialisation LCD
     Wire.begin(LCD_SDA, LCD_SCL);
@@ -158,37 +216,30 @@ void setup() {
         lcd.setCursor(0, 1);
         lcd.print("192.168.4.1");
     }
-    // if (!configManager.begin()) {
-    //     lcd.clear();
-    //     lcd.print("Mode config AP");
-    //     lcd.setCursor(0, 1);
-    //     lcd.print("192.168.4.1");
-        
-    //     while (!configManager.isConfigured()) {
-    //         configManager.handleClient();
-    //         delay(100);
-    //     }
-    // }
+  
 
-  NetworkConfig config = configManager.getConfig();
-    // WiFi.begin(config.wifiSSID.c_str(), config.wifiPassword.c_str());
+    if (WiFi.hostByName("raspberrypi.local", MQTTBrokerip)) {
+        Serial.print("IP du broker MQTT: ");
+        Serial.println(MQTTBrokerip);
+    } else {
+        Serial.println("Échec de résolution DNS");
+        delay(5000);
+        }
     
-    // while (WiFi.status() != WL_CONNECTED) {
-    //     delay(500);
-    //     Serial.print(".");
-    // }
+    bool mqttConnected = device.begin(MQTTBrokerip);
 
-    mqttConnected = device.begin(config.mqttServer.c_str(), config.mqttPort);
-if (mqttConnected) {
-    device.setupHA();
-    lcd.clear();
-    device.updateLCD();
-} else {
-    Serial.println("MQTT non disponible, tentative plus tard...");
-    lcd.clear();
-    lcd.print("MQTT indispo");
-}
 
+    if (mqttConnected) {
+        Serial.println("Connecté au broker MQTT!");
+        device.setupHA();
+        lcd.clear();
+        device.updateLCD();
+    } else {
+        Serial.println("MQTT non disponible, tentative plus tard...");
+        lcd.clear();
+        lcd.print("MQTT indispo");
+    }
+                
 }
 
 void loop() {
@@ -197,28 +248,50 @@ void loop() {
 
     configManager.handleClient();  // Pour le portail
 
-if(!wifiConnected) tryReconnectWiFi(config);
+    if(!wifiConnected) tryReconnectWiFi(config);
     device.handle();
 
-   // tryReconnectMQTT(config);
 
-    if (millis() - lastUpdate > 2000) { // Toutes les 2 secondes
+
+    if (millis() - lastUpdate > 1000) { // Toutes les 2 secondes
         // Lecture des capteurs
         float temperature = device.readTemperature();
+        float humidity = dht.readHumidity();
         int gasLevel = device.readGasLevel();
         bool presence = device.readPresence();
+        Serial.println("Température: "+String(temperature));
+        Serial.println("Gaz: "+String(gasLevel));
+        Serial.println("Présence: "+String(presence ? "ON" : "OFF"));
+        
+        int gasPercentage = device.readGasLevelPercentage();
 
         // Envoi des données
         device.publishSensorData("cuisine", "temperature", temperature);
-        device.publishSensorData("cuisine", "gaz", gasLevel);
-        device.publishSensorData("cuisine", "presence", presence ? "ON" : "OFF");
+        device.publishSensorData("cuisine", "humidite", humidity);
+        device.publishSensorData("cuisine", "gaz", gasPercentage);
+        device.publishSensorData("cuisine", "presence", presence ? String("ON") : String("OFF"));
 
-        // Gestion alarme gaz
-        if (gasLevel > 50) { // Seuil à ajuster
+        //  Détection d'incendie
+    if (gasPercentage > 30 && temperature > 40) {
+        // Tonalité rapide pour l'incendie
+        digitalWrite(BUZZER_PIN, HIGH);
+        Serial.println(" Incendie détecté !");
+        device.publishSensorData("cuisine", "buzzer", String("ON"));
+        }         // Gestion alarme gaz
+        else  if (gasPercentage > 30) { // Seuil à ajuster
             digitalWrite(BUZZER_PIN, HIGH);
-            device.publishSensorData("cuisine", "buzzer", "ON");
+            Serial.println("Alerte gaz détecté !");
+            device.publishSensorData("cuisine", "buzzer", String("ON"));
+
         } else {
-            digitalWrite(BUZZER_PIN, LOW);
+    
+            if(!AlarmDeclenchedByHA){digitalWrite(BUZZER_PIN, LOW);
+                Serial.println("Gaz normal, alarme désactivée.");
+                device.publishSensorData("cuisine", "buzzer", String("OFF"));}
+            else {
+                Serial.println("Gaz normal mais alarme maintenue par Home Assistant.");
+            }
+
         }
 
         // Mise à jour LCD
@@ -227,3 +300,4 @@ if(!wifiConnected) tryReconnectWiFi(config);
         lastUpdate = millis();
     }
 }
+#endif

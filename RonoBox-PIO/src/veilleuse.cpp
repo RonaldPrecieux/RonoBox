@@ -1,3 +1,5 @@
+#ifdef MODULE_VEILLEUSE
+
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include "MQTTDevice.h"
@@ -8,12 +10,33 @@
 #define RELAY_PIN D5      // Broche pour le relais
 #define SOUND_SENSOR_PIN D6  // Broche analogique pour le capteur de son
 
+unsigned long lastWifiAttempt = 0;
+unsigned long lastMQTTAttempt = 0;
+const unsigned long retryInterval = 15000;
+
+#define LED_PIN  4
+
+// Variables pour le clignotement
+unsigned long BlinkpreviousMillis = 0;
+const long fastBlinkInterval = 200;  // Intervalle rapide (non connecté WiFi)
+const long normalBlinkInterval = 500; // Intervalle normal (WiFi OK mais pas MQTT)
+bool ledState = LOW;
+
+bool wifiConnected = false;
+bool mqttConnected = false;
+IPAddress MQTTBrokerip;
+
+ConfigManager configManager;
+NetworkConfig config;
+
 class MySmartHomeDevice : public MQTTDevice {
 private:
     bool lampState;
     bool soundControlEnabled;
     unsigned long lastSoundDetection;
     const unsigned long soundTimeout = 1000;
+
+
  
 public:
     MySmartHomeDevice() : MQTTDevice(WiFi.macAddress()), lampState(false), soundControlEnabled(true), lastSoundDetection(0) {
@@ -23,12 +46,13 @@ public:
     }
 
         void initPublish(){
-        publishSensorData("salon", "lampe", lampState ? "ON" : "OFF");
+        publishSensorData("salon", "lampe", lampState ? String("ON") : String("OFF"));
         // Control Sound
-        publishSensorData("salon", "sound", soundControlEnabled ? "ON" : "OFF");
+        publishSensorData("salon", "sound", soundControlEnabled ? String("ON") : String("OFF"));
 
 
     }
+
 
     void setupHA() {    
         // Switch Lampe
@@ -68,11 +92,11 @@ public:
             setLampState(value == "ON");
             Serial.print("Commande lampe reçue: ");
             Serial.println(value);
-            publishSensorData(location, device, lampState ? "ON" : "OFF");
+            publishSensorData(location, device, lampState ? String("ON") : String("OFF"));
         }
         else if (device == "sound") {
             soundControlEnabled = (value == "ON");
-            publishSensorData(location, device, soundControlEnabled ? "ON" : "OFF");
+            publishSensorData(location, device, soundControlEnabled ? String("ON") : String("OFF"));
             Serial.print("Contrôle par son ");
             Serial.println(soundControlEnabled ? "activé" : "désactivé");
         }
@@ -83,7 +107,7 @@ public:
     void setLampState(bool state) {
         lampState = state;
         digitalWrite(RELAY_PIN, state ? HIGH : LOW);
-        publishSensorData("salon", "lampe", state ? "ON" : "OFF");
+        publishSensorData("salon", "lampe", state ? String("ON") : String("OFF"));
     }
 
     void toggleLamp() {
@@ -102,45 +126,97 @@ public:
         }
     }
 
+    void updateLED() {
+        unsigned long currentMillis = millis();
+        
+        if (!wifiConnected) {
+            // Clignotement rapide - Pas de WiFi
+            if (currentMillis - BlinkpreviousMillis >= fastBlinkInterval) {
+                BlinkpreviousMillis = currentMillis;
+                ledState = !ledState;
+                digitalWrite(LED_PIN, ledState);
+            }
+        } else if (!mqttConnection) {
+            // Clignotement normal - WiFi OK mais pas MQTT
+            if (currentMillis - BlinkpreviousMillis >= normalBlinkInterval) {
+                BlinkpreviousMillis = currentMillis;
+                ledState = !ledState;
+                digitalWrite(LED_PIN, ledState);
+            }
+        } else {
+            // LED allumée en continu - Tout est connecté
+            digitalWrite(LED_PIN, HIGH);
+        }
+    }
+
+
+    void tryReconnectWiFi(NetworkConfig config) {
+    if (WiFi.status() != WL_CONNECTED) {
+        wifiConnected = false;
+        if (millis() - lastWifiAttempt > retryInterval) {
+            Serial.println("Tentative de reconnexion WiFi...");
+            WiFi.begin(config.wifiSSID.c_str(), config.wifiPassword.c_str());
+            lastWifiAttempt = millis();
+        }
+    } else {
+        wifiConnected = true;
+    }
+}
+
+    
+
     void handle() {
+       tryReconnectWiFi(configManager.getConfig());
+
         MQTTDevice::handle();
         checkSoundSensor();
+                updateLED();  // Ajoutez cette ligne
+
+        
     }
 };
 
-ConfigManager configManager;
+//ConfigManager configManager;
+//NetworkConfig config;
 MySmartHomeDevice device;
-NetworkConfig config;
+
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);
-
-
     Serial.println("App Launching");
-              
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
+
     if (!configManager.begin()) {
         Serial.println("Mode configuration AP actif");
         Serial.println("Connectez-vous au WiFi 'SmartHome-Config'");
         Serial.println("Ouvrez http://192.168.4.1 dans votre navigateur");
-        
-        // Debug
-        NetworkConfig config = configManager.getConfig();
-        Serial.println("Tentative de connexion à: ");
-        Serial.println(config.wifiSSID);
-            
-        while (!configManager.isConfigured()) {
-            configManager.handleClient();
-            delay(100);
-        }
-    }
 
-    config = configManager.getConfig();
-    device.begin(config.mqttServer.c_str());
-    delay(2000);
-    device.setupHA();
-    delay(500);
-    device.initPublish();
+    }
+  
+
+    if (WiFi.hostByName("raspberrypi.local", MQTTBrokerip)) {
+        Serial.print("IP du broker MQTT: ");
+        Serial.println(MQTTBrokerip);
+    } else {
+        Serial.println("Échec de résolution DNS");
+        delay(5000);
+        }
+    
+    bool mqttConnected = device.begin(MQTTBrokerip);
+
+
+    if (mqttConnected) {
+        Serial.println("Connecté au broker MQTT!");
+        device.setupHA();
+        device.initPublish();
+
+
+    } else {
+        Serial.println("MQTT non disponible, tentative plus tard...");
+       
+    }
 }
 
 
@@ -161,3 +237,5 @@ void loop() {
         lastSend = millis();
     }
 }
+
+#endif

@@ -20,6 +20,9 @@ public:
           topicManager(mqttClient, macAddress),
           haConfig(topicManager) {}
 
+    bool mqttConnection = false;
+
+
     // Méthodes begin() identiques pour les deux plateformes
     bool begin(const char* mqttServer, int mqttPort = 1883) {
         mqttClient.setServer(mqttServer, mqttPort);
@@ -39,6 +42,7 @@ public:
 
     void handle() {
         if (!mqttClient.connected()) {
+            mqttConnection = false;
             unsigned long now = millis();
             if (now - lastReconnectAttempt > reconnectInterval) {
                 Serial.println("[MQTT] Tentative de reconnexion...");
@@ -53,6 +57,7 @@ public:
             }
             return;
         }
+        mqttConnection = true;
         mqttClient.loop();
     }
 
@@ -108,6 +113,9 @@ private:
 
             subscribeTopic = topicManager.getBaseTopic("salon") + "/+/set";
             mqttClient.subscribe(subscribeTopic.c_str());
+            subscribeTopic = topicManager.getBaseTopic("cuisine") + "/+/set";
+            mqttClient.subscribe(subscribeTopic.c_str());
+
 
             return true;
         } else {
