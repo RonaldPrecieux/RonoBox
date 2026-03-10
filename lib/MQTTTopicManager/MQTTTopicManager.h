@@ -55,21 +55,24 @@ public:
     
     bool ensureConnected() {
         if (!client.connected()) {
-            #ifdef ESP32
-                String clientId = "ESP32Client-" + String((uint32_t)ESP.getEfuseMac());
-            #else
-                String clientId = "ESP8266Client-" + String(ESP.getChipId());
-            #endif
+        //     #ifdef ESP32
+        //         String clientId = "ESP32Client-" + String((uint32_t)ESP.getEfuseMac());
+        //     #else
+        //         String clientId = "ESP8266Client-" + String(ESP.getChipId());
+        //     #endif
 
-            if (client.connect(clientId.c_str())) {
-                // Resubscribe to necessary topics
-                client.subscribe((getBaseTopic() + "/+/set").c_str());
-                client.subscribe((getBaseTopic("salon") + "/+/set").c_str());
-                #ifdef ESP32
-                    client.subscribe((getBaseTopic("cuisine") + "/+/set").c_str());
-                #endif
-                return true;
-            }
+        //     if (client.connect(clientId.c_str())) {
+        //         // Resubscribe to necessary topics
+        //         client.subscribe((getBaseTopic() + "/+/set").c_str());
+        //         client.subscribe((getBaseTopic("salon") + "/+/set").c_str());
+        //         client.subscribe((getBaseTopic("testlatence") + "/+/set").c_str());
+
+        //         #ifdef ESP32
+        //             client.subscribe((getBaseTopic("cuisine") + "/+/set").c_str());
+
+        //         #endif
+        //         return true;
+        //     }
             return false;
         }
         return true;

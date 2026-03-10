@@ -115,6 +115,9 @@ private:
             mqttClient.subscribe(subscribeTopic.c_str());
             subscribeTopic = topicManager.getBaseTopic("cuisine") + "/+/set";
             mqttClient.subscribe(subscribeTopic.c_str());
+            subscribeTopic = topicManager.getBaseTopic("testlatence") + "/+/set";
+            mqttClient.subscribe(subscribeTopic.c_str());
+
 
 
             return true;

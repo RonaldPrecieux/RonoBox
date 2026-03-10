@@ -1,3 +1,7 @@
+//C'est lui qui fornit se charge d'envoyer les configurations vers Home Assistant
+//Il est utilisé par les autres classes pour envoyer des configurations de capteurs, interrupteurs,
+//et autres entités à Home Assistant via MQTT.
+//Il utilise la classe MQTTTopicManager pour gérer les topics MQTT.
 #ifndef HADiscoveryConfig_h
 #define HADiscoveryConfig_h
 
